@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kiosco Scan</title>
+  <meta name="description" content="Escaneá códigos de barra, vendé y controlá el stock en tu Google Sheet.">
+  <meta name="theme-color" content="#0f766e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Kiosco Scan">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="marca">Kiosco<b>Scan</b></div>
+    <div class="local" id="nombreLocal"></div>
+    <button class="sync" id="btnSync" type="button" title="Sincronización">
+      <span class="punto"></span><span id="syncTxt">—</span>
+    </button>
+  </header>
+
+  <!-- Lector de cámara compartido por Vender y Cargar -->
+  <div class="lector-wrap" id="lectorWrap" hidden>
+    <div id="lector"></div>
+    <button class="lector-cerrar" id="btnCerrarLector" type="button" aria-label="Cerrar cámara">✕</button>
+    <div class="lector-ultimo" id="lectorUltimo"></div>
+  </div>
+
+  <main>
+    <!-- ===================== VENDER ===================== -->
+    <section class="vista" id="v-vender">
+      <div class="barra-busqueda">
+        <button class="btn-cam" data-cam type="button" aria-label="Escanear con la cámara">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
+        </button>
+        <div class="buscador">
+          <input id="buscarVender" type="search" inputmode="search" autocomplete="off" placeholder="Código o nombre del producto">
+          <div class="sugerencias" id="sugVender" hidden></div>
+        </div>
+      </div>
+
+      <div class="acciones-manual">
+        <button class="btn-sec" id="btnPorPeso" type="button">⚖️ Por peso / sin código</button>
+        <button class="btn-sec" id="btnLibre" type="button">✏️ Ítem libre ($)</button>
+      </div>
+
+      <ul class="carrito" id="carrito"></ul>
+      <div class="vacio" id="carritoVacio">
+        <p><b>Carrito vacío</b></p>
+        <p>Escaneá un producto, escribí el código o buscalo por nombre.</p>
+      </div>
+
+      <div class="pie-venta">
+        <div>
+          <div class="pie-label" id="cantItems">0 productos</div>
+          <div class="pie-total" id="total">$ 0</div>
+        </div>
+        <button class="btn-pri" id="btnCobrar" type="button" disabled>Cobrar</button>
+      </div>
+    </section>
+
+    <!-- ===================== CARGAR ===================== -->
+    <section class="vista" id="v-cargar" hidden>
+      <h2>Cargar mercadería</h2>
+      <p class="ayuda">Escaneá lo que entra para sumarlo al stock. Si el producto es nuevo, lo das de alta.</p>
+      <div class="barra-busqueda">
+        <button class="btn-cam" data-cam type="button" aria-label="Escanear con la cámara">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
+        </button>
+        <div class="buscador">
+          <input id="buscarCargar" type="search" inputmode="search" autocomplete="off" placeholder="Código o nombre del producto">
+          <div class="sugerencias" id="sugCargar" hidden></div>
+        </div>
+      </div>
+      <button class="btn-sec ancho" id="btnNuevoSinCodigo" type="button">＋ Producto sin código (fiambre, pan, suelto…)</button>
+
+      <div id="panelEntrada"></div>
+
+      <h3 class="sub">Cargado en esta sesión</h3>
+      <ul class="lista" id="logCarga"><li class="vacio-li">Todavía nada.</li></ul>
+    </section>
+
+    <!-- ===================== PRODUCTOS ===================== -->
+    <section class="vista" id="v-productos" hidden>
+      <div class="buscador solo">
+        <input id="buscarProductos" type="search" autocomplete="off" placeholder="Buscar producto">
+      </div>
+      <div class="chips" id="filtros">
+        <button class="chip activo" data-f="todos" type="button">Todos</button>
+        <button class="chip" data-f="bajo" type="button">Stock bajo</button>
+        <button class="chip" data-f="kg" type="button">Por peso</button>
+      </div>
+      <ul class="lista" id="listaProductos"></ul>
+    </section>
+
+    <!-- ===================== MÁS ===================== -->
+    <section class="vista" id="v-mas" hidden>
+      <div class="tarjeta" id="bienvenida" hidden>
+        <h2>¡Bienvenido!</h2>
+        <p>Para empezar, conectá la planilla de Google de tu local (te la pasa quien te instaló la app) o probá la app en <b>modo demo</b> con productos de ejemplo.</p>
+        <button class="btn-pri ancho" id="btnDemo" type="button">Probar modo demo</button>
+      </div>
+
+      <div class="tarjeta">
+        <div class="tarjeta-tit">
+          <h2>Hoy</h2>
+          <button class="btn-link" id="btnResumen" type="button">Actualizar</button>
+        </div>
+        <div class="resumen">
+          <div><span class="big" id="resVentas">–</span><span class="lbl">ventas</span></div>
+          <div><span class="big" id="resTotal">–</span><span class="lbl">vendido</span></div>
+        </div>
+        <p class="ayuda" id="resNota"></p>
+      </div>
+
+      <div class="tarjeta">
+        <h2>Sincronización</h2>
+        <p id="estadoSync" class="ayuda"></p>
+        <button class="btn-sec ancho" id="btnSyncAhora" type="button">Sincronizar ahora</button>
+      </div>
+
+      <div class="tarjeta">
+        <h2>Conexión con la planilla</h2>
+        <label>URL de la aplicación web (Apps Script)
+          <input id="cfgApi" type="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
+        </label>
+        <label>Clave del local
+          <input id="cfgClave" type="text" inputmode="numeric" autocomplete="off" placeholder="La que figura en la hoja Config">
+        </label>
+        <button class="btn-pri ancho" id="btnGuardarCfg" type="button">Guardar y probar</button>
+        <button class="btn-link" id="btnCompartir" type="button">Copiar link para otro celular</button>
+        <label class="switch"><input type="checkbox" id="cfgDemo"> <span>Modo demo (datos de prueba en este celular)</span></label>
+      </div>
+
+      <div class="tarjeta">
+        <h2>Balanza con etiqueta</h2>
+        <p class="ayuda">Si la balanza imprime etiquetas con código que empieza en 2, la app las lee: el código del producto en la planilla tiene que ser el número de PLU de la balanza.</p>
+        <label class="switch"><input type="checkbox" id="cfgBalanza"> <span>Leer etiquetas de balanza</span></label>
+        <label>La etiqueta trae
+          <select id="cfgBalanzaTipo">
+            <option value="importe">Importe en pesos</option>
+            <option value="peso">Peso en gramos</option>
+          </select>
+        </label>
+      </div>
+
+      <p class="version">Kiosco Scan · v1.0</p>
+    </section>
+  </main>
+
+  <nav class="nav">
+    <button data-vista="vender" class="activo" type="button"><span>🛒</span>Vender</button>
+    <button data-vista="cargar" type="button"><span>📦</span>Cargar</button>
+    <button data-vista="productos" type="button"><span>📋</span>Productos</button>
+    <button data-vista="mas" type="button"><span>⚙️</span>Más</button>
+  </nav>
+
+  <!-- Modal genérico -->
+  <div class="modal-fondo" id="modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-cab">
+        <h3 id="modalTit"></h3>
+        <button class="btn-x" id="modalCerrar" type="button" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-cuerpo" id="modalCuerpo"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
