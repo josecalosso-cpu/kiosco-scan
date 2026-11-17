@@ -24,8 +24,16 @@
 
   <!-- Lector de cámara compartido por Vender y Cargar -->
   <div class="lector-wrap" id="lectorWrap" hidden>
-    <div id="lector"></div>
+    <div id="lector">
+      <video id="lectorVideo" playsinline muted autoplay></video>
+      <div class="lector-guia"><span></span></div>
+      <div class="lector-estado" id="lectorEstado">Abriendo cámara…</div>
+    </div>
     <button class="lector-cerrar" id="btnCerrarLector" type="button" aria-label="Cerrar cámara">✕</button>
+    <div class="lector-botones">
+      <button id="btnLinterna" type="button" hidden>🔦 Luz</button>
+      <button id="btnZoom" type="button" hidden>1×</button>
+    </div>
     <div class="lector-ultimo" id="lectorUltimo"></div>
   </div>
 
@@ -171,7 +179,6 @@
 
   <div class="toast" id="toast" hidden></div>
 
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

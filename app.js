@@ -269,48 +269,199 @@ async function refrescarProductos() {
 /* Escáner                                                             */
 /* ================================================================== */
 
+const LIB_LECTOR = 'https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/dist/iife/ponyfill.js';
+const FORMATOS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'qr_code'];
+
+function cargarScript(src) {
+  return new Promise((ok, mal) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = ok;
+    s.onerror = () => mal(new Error('No se pudo descargar el lector. Revisá la conexión.'));
+    document.head.appendChild(s);
+  });
+}
+
+/**
+ * Lector de códigos: cámara en alta resolución + enfoque continuo.
+ * Usa el detector nativo del celular (Android/Chrome) y si no existe,
+ * el motor ZXing-C++ en WebAssembly (iPhone, otros navegadores).
+ */
 const Lector = {
-  inst: null,
   activo: false,
-  pausa: false,
+  abriendo: false,
+  stream: null,
+  track: null,
+  detector: null,
+  canvas: null,
   ultimo: '',
   ultimoT: 0,
+  candidato: '',
   onCodigo: null,
+  zoomNiveles: [],
+  zoomIdx: 0,
+  linterna: false,
+
+  async crearDetector() {
+    if (this.detector) return this.detector;
+    if ('BarcodeDetector' in window) {
+      try {
+        const soportados = await window.BarcodeDetector.getSupportedFormats();
+        if (soportados.includes('ean_13')) {
+          this.detector = new window.BarcodeDetector({ formats: FORMATOS.filter((f) => soportados.includes(f)) });
+          return this.detector;
+        }
+      } catch { /* usamos el de respaldo */ }
+    }
+    if (!window.BarcodeDetectionAPI) await cargarScript(LIB_LECTOR);
+    this.detector = new window.BarcodeDetectionAPI.BarcodeDetector({ formats: FORMATOS });
+    return this.detector;
+  },
 
   async abrir(onCodigo) {
     this.onCodigo = onCodigo;
-    if (this.activo) return;
-    if (typeof Html5Qrcode === 'undefined') { toast('No se pudo cargar el lector. Revisá la conexión.', 'error'); return; }
+    if (this.activo || this.abriendo) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return toast(window.isSecureContext ? 'Este navegador no permite usar la cámara' : 'La cámara sólo funciona con https', 'error');
+    }
+    this.abriendo = true;
     $('#lectorWrap').hidden = false;
+    $('#lectorEstado').textContent = 'Abriendo cámara…';
     $$('[data-cam]').forEach((b) => b.classList.add('activo'));
-    const F = Html5QrcodeSupportedFormats;
     try {
-      this.inst = this.inst || new Html5Qrcode('lector', {
-        verbose: false,
-        formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.ITF, F.QR_CODE],
-        useBarCodeDetectorIfSupported: true,
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-      });
-      await this.inst.start(
-        { facingMode: 'environment' },
-        { fps: 12, qrbox: (w, h) => ({ width: Math.floor(w * 0.85), height: Math.floor(Math.min(h, w) * 0.4) }) },
-        (txt) => this.leido(txt),
-        () => {}
-      );
+      const [stream] = await Promise.all([
+        navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            advanced: [{ focusMode: 'continuous' }],
+          },
+        }),
+        this.crearDetector(),
+      ]);
+      if (!this.abriendo) { stream.getTracks().forEach((t) => t.stop()); return; } // se cerró mientras abría
+      this.stream = stream;
+      this.track = stream.getVideoTracks()[0];
+      const v = $('#lectorVideo');
+      v.srcObject = stream;
+      await v.play().catch(() => {});
+      await this.configurarCamara();
       this.activo = true;
+      $('#lectorEstado').textContent = 'Poné el código dentro del recuadro, a unos 15 cm';
+      setTimeout(() => { if (this.activo) $('#lectorEstado').textContent = ''; }, 3500);
+      this.bucle();
     } catch (e) {
       this.cerrar();
-      const msg = String(e && (e.message || e));
-      if (/permission|notallowed/i.test(msg)) toast('Permití el acceso a la cámara para escanear', 'error');
-      else if (!window.isSecureContext) toast('La cámara sólo funciona con https', 'error');
+      const msg = String((e && (e.message || e.name)) || e);
+      if (/permission|notallowed|denied/i.test(msg)) toast('Permití el acceso a la cámara para escanear', 'error');
       else toast('No se pudo abrir la cámara: ' + msg, 'error');
+    } finally {
+      this.abriendo = false;
     }
+  },
+
+  async configurarCamara() {
+    const t = this.track;
+    const cap = (t.getCapabilities && t.getCapabilities()) || {};
+    const avanzado = {};
+    if (cap.focusMode && cap.focusMode.includes('continuous')) avanzado.focusMode = 'continuous';
+    if (cap.exposureMode && cap.exposureMode.includes('continuous')) avanzado.exposureMode = 'continuous';
+    if (Object.keys(avanzado).length) { try { await t.applyConstraints({ advanced: [avanzado] }); } catch { /* opcional */ } }
+
+    // Zoom: ayuda mucho con celulares que no enfocan de cerca
+    this.zoomNiveles = [];
+    if (cap.zoom && cap.zoom.max > 1) {
+      const min = cap.zoom.min || 1;
+      this.zoomNiveles = [min, 1.5, 2, 3].filter((z) => z >= min && z <= cap.zoom.max);
+      if (this.zoomNiveles.length < 2) this.zoomNiveles = [];
+    }
+    const bz = $('#btnZoom');
+    bz.hidden = !this.zoomNiveles.length;
+    if (this.zoomNiveles.length) {
+      // Arranca en 1,5× si se puede: así el código se acerca sin acercar el celular
+      this.zoomIdx = Math.max(0, this.zoomNiveles.indexOf(1.5));
+      await this.aplicarZoom();
+    }
+
+    const bl = $('#btnLinterna');
+    bl.hidden = !cap.torch;
+    this.linterna = false;
+    bl.classList.remove('on');
+  },
+
+  async aplicarZoom() {
+    const z = this.zoomNiveles[this.zoomIdx];
+    try { await this.track.applyConstraints({ advanced: [{ zoom: z }] }); } catch { /* opcional */ }
+    $('#btnZoom').textContent = fmtNum.format(z) + '×';
+  },
+
+  async cambiarZoom() {
+    if (!this.zoomNiveles.length) return;
+    this.zoomIdx = (this.zoomIdx + 1) % this.zoomNiveles.length;
+    await this.aplicarZoom();
+  },
+
+  async cambiarLinterna() {
+    this.linterna = !this.linterna;
+    try {
+      await this.track.applyConstraints({ advanced: [{ torch: this.linterna }] });
+      $('#btnLinterna').classList.toggle('on', this.linterna);
+    } catch {
+      this.linterna = false;
+      toast('Este celular no permite prender la luz desde el navegador', 'error');
+    }
+  },
+
+  /** Recorta la zona del recuadro y busca códigos, ~10 veces por segundo */
+  async bucle() {
+    const v = $('#lectorVideo');
+    this.canvas = this.canvas || document.createElement('canvas');
+    const ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+    let vuelta = 0;
+    while (this.activo) {
+      const inicio = performance.now();
+      if (v.readyState >= 2 && v.videoWidth) {
+        const vw = v.videoWidth;
+        const vh = v.videoHeight;
+        // Una de cada 4 vueltas mira el cuadro entero (por si el código quedó fuera del recuadro)
+        const entero = vuelta++ % 4 === 3;
+        const sw = entero ? vw : Math.round(vw * 0.9);
+        const sh = entero ? vh : Math.round(vh * 0.6);
+        const sx = Math.round((vw - sw) / 2);
+        const sy = Math.round((vh - sh) / 2);
+        const escala = Math.min(1, 1600 / sw);
+        this.canvas.width = Math.round(sw * escala);
+        this.canvas.height = Math.round(sh * escala);
+        ctx.drawImage(v, sx, sy, sw, sh, 0, 0, this.canvas.width, this.canvas.height);
+        try {
+          const res = await this.detector.detect(this.canvas);
+          if (res && res.length) this.encontrado(res[0]);
+        } catch { /* cuadro sin código */ }
+      }
+      const espera = Math.max(30, 100 - (performance.now() - inicio));
+      await new Promise((r) => setTimeout(r, espera));
+    }
+  },
+
+  encontrado(r) {
+    const txt = String(r.rawValue || '').trim();
+    if (!txt) return;
+    // Code 39 / ITF no tienen dígito verificador fuerte: pedimos dos lecturas iguales
+    if (r.format === 'code_39' || r.format === 'itf') {
+      if (this.candidato !== txt) { this.candidato = txt; return; }
+    }
+    this.candidato = '';
+    this.leido(txt);
   },
 
   leido(txt) {
     const ahora = Date.now();
-    if (this.pausa || !$('#modal').hidden) return;
-    if (txt === this.ultimo && ahora - this.ultimoT < 2500) return; // evita lecturas repetidas
+    if (!$('#modal').hidden) return;
+    // Mismo código todavía frente a la cámara: no se vuelve a sumar.
+    // Para sumar otra unidad hay que sacarlo del cuadro (1,2 s) o tocar "+".
+    if (txt === this.ultimo && ahora - this.ultimoT < 1200) { this.ultimoT = ahora; return; }
     this.ultimo = txt;
     this.ultimoT = ahora;
     const w = $('#lectorWrap');
@@ -320,14 +471,17 @@ const Lector = {
     if (this.onCodigo) this.onCodigo(txt);
   },
 
-  async cerrar() {
+  cerrar() {
+    this.activo = false;
+    this.abriendo = false;
     $('#lectorWrap').hidden = true;
     $$('[data-cam]').forEach((b) => b.classList.remove('activo'));
     $('#lectorUltimo').textContent = '';
-    if (this.inst && this.activo) {
-      try { await this.inst.stop(); } catch { /* ya estaba detenido */ }
-    }
-    this.activo = false;
+    if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    this.track = null;
+    const v = $('#lectorVideo');
+    if (v) v.srcObject = null;
   },
 };
 
@@ -909,6 +1063,8 @@ function init() {
     Lector.abrir(S.vista === 'cargar' ? codigoEnCarga : codigoEnVenta);
   }));
   $('#btnCerrarLector').onclick = () => Lector.cerrar();
+  $('#btnZoom').onclick = () => Lector.cambiarZoom();
+  $('#btnLinterna').onclick = () => Lector.cambiarLinterna();
 
   // Vender
   conectarBuscador($('#buscarVender'), $('#sugVender'), codigoEnVenta, (p) => agregarProducto(p));

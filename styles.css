@@ -81,9 +81,20 @@ h3.sub { font-size: 15px; color: var(--txt2); margin: 20px 0 8px; font-weight: 6
   position: sticky; top: 52px; z-index: 15;
   background: #000; max-width: 640px; margin: 0 auto;
 }
-#lector { width: 100%; min-height: 200px; }
-#lector video { width: 100% !important; max-height: 38vh; object-fit: cover; display: block; }
-#lector img[alt="Info icon"], #lector__dashboard_section_csr span { display: none !important; }
+#lector { position: relative; width: 100%; height: 34vh; min-height: 200px; overflow: hidden; }
+#lector video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lector-guia {
+  position: absolute; left: 7%; right: 7%; top: 22%; bottom: 22%;
+  border: 2px solid rgba(255,255,255,.85); border-radius: 12px;
+  box-shadow: 0 0 0 100vmax rgba(0,0,0,.35); pointer-events: none;
+}
+.lector-guia span { position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; background: #ef4444; box-shadow: 0 0 8px #ef4444; animation: barrido 1.6s ease-in-out infinite alternate; }
+@keyframes barrido { from { transform: translateY(-28px); } to { transform: translateY(28px); } }
+.lector-estado { position: absolute; left: 0; right: 0; top: 8px; text-align: center; color: #fff; font-size: 13px; text-shadow: 0 1px 3px #000; pointer-events: none; }
+.lector-estado:empty { display: none; }
+.lector-botones { position: absolute; right: 8px; bottom: 8px; z-index: 3; display: flex; gap: 6px; }
+.lector-botones button { height: 38px; padding: 0 12px; border-radius: 999px; border: 0; background: rgba(0,0,0,.6); color: #fff; font-weight: 600; }
+.lector-botones button.on { background: #facc15; color: #000; }
 .lector-cerrar {
   position: absolute; top: 8px; right: 8px; z-index: 3;
   width: 40px; height: 40px; border-radius: 50%;

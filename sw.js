@@ -1,5 +1,5 @@
 /* Service worker: guarda la app en el celular para que abra sin internet. */
-const VERSION = 'ks-v1';
+const VERSION = 'ks-v2';
 const ARCHIVOS = [
   './',
   'index.html',
@@ -9,7 +9,8 @@ const ARCHIVOS = [
   'icon.svg',
   'icon-192.png',
   'icon-512.png',
-  'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',
+  'https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/dist/iife/ponyfill.js',
+  'https://fastly.jsdelivr.net/npm/zxing-wasm@3.1.6/dist/reader/zxing_reader.wasm',
 ];
 
 self.addEventListener('install', (e) => {
